@@ -1,5 +1,7 @@
 # nhtsa complaints
-- objective: analyze streaming nhtsa vehicle complaints data
+- objectives
+    - analyze streaming nhtsa vehicle complaints data
+    - showcase utilization of aws cloud services
 
 ## data sources
 - https://www.nhtsa.gov/nhtsa-datasets-and-apis#complaints
