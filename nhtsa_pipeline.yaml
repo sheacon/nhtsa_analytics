@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: your-s3-bucket-name
+
+  LambdaFetchTrain:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: FetchAndTrainLambda
+      Handler: lambda_fetch_train.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Code:
+        S3Bucket: your-s3-bucket-name
+        S3Key: lambda/fetch_train.zip
+      Timeout: 300
+      MemorySize: 128
+
+  LambdaPredict:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: PredictLambda
+      Handler: lambda_predict_s3.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Code:
+        S3Bucket: your-s3-bucket-name
+        S3Key: lambda/predict.zip
+      Timeout: 300
+      MemorySize: 128
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: LambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaS3SageMakerPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::your-s3-bucket-name/*"
+                  - !Sub "arn:aws:s3:::your-s3-bucket-name"
+              - Effect: Allow
+                Action:
+                  - sagemaker:CreateTrainingJob
+                  - sagemaker:DescribeTrainingJob
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  EventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: WeeklyLambdaTrigger
+      ScheduleExpression: cron(0 10 ? * MON *)
+      State: ENABLED
+      Targets:
+        - Id: FetchTrainLambda
+          Arn: !GetAtt LambdaFetchTrain.Arn
+
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LambdaFetchTrain.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt EventRule.Arn
