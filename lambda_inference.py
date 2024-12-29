@@ -63,10 +63,10 @@ def lambda_handler(event, context):
     s3 = boto3.client('s3')
 
     # Parameters
-    bucket_name = "your-s3-bucket-name"
+    bucket_name = event.get('bucket_name', 'nhtsa-analytics')
     model_s3_key = "models/model.joblib"
-    output_s3_key = "predictions/2021_predictions.csv"
-    model_year = 2021
+    model_year = event.get('model_year', 2021)
+    output_s3_key = f"predictions/{model_year}_predictions.csv"
 
     # Load the model from S3
     model_file = "/tmp/model.joblib"

@@ -61,10 +61,12 @@ def lambda_handler(event, context):
     s3 = boto3.client('s3')
     sagemaker = boto3.client('sagemaker')
 
-    # Parameters
-    bucket_name = "your-s3-bucket-name"
-    role = "arn:aws:iam::your-account-id:role/service-role/AmazonSageMaker-ExecutionRole"
-    model_year = 2020
+    # Extract parameters from the event payload
+    bucket_name = event.get('bucket_name', 'nhtsa-analytics')
+    model_year = event.get('model_year', 2020)
+    #sagemaker_role = event.get('sagemaker_role', "arn:aws:iam::your-account-id:role/service-role/AmazonSageMaker-ExecutionRole")
+    train_runtime = event.get('train_runtime', 600)
+    train_instance = event.get('train_instance', "ml.m5.large")
     output_s3_path = f"s3://{bucket_name}/models/"
 
     # Fetch data
@@ -86,7 +88,7 @@ def lambda_handler(event, context):
             "TrainingImage": "683313688378.dkr.ecr.us-west-2.amazonaws.com/sagemaker-sklearn:0.23-1-cpu-py3",
             "TrainingInputMode": "File"
         },
-        RoleArn=role,
+        #RoleArn=sagemaker_role,
         InputDataConfig=[
             {
                 "ChannelName": "train",
@@ -104,12 +106,12 @@ def lambda_handler(event, context):
             "S3OutputPath": output_s3_path
         },
         ResourceConfig={
-            "InstanceType": "ml.m5.large",
+            "InstanceType": train_instance,
             "InstanceCount": 1,
             "VolumeSizeInGB": 10
         },
         StoppingCondition={
-            "MaxRuntimeInSeconds": 3600
+            "MaxRuntimeInSeconds": train_runtime
         }
     )
 
