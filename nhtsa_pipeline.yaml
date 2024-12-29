@@ -1,33 +1,31 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Resources:
-  S3Bucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: your-s3-bucket-name
 
-  LambdaFetchTrain:
+# LAMBDA FUNCTIONS
+
+  TrainLambda:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: FetchAndTrainLambda
-      Handler: lambda_fetch_train.lambda_handler
+      FunctionName: TrainLambda
+      Handler: lambda_train.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Runtime: python3.9
       Code:
-        S3Bucket: your-s3-bucket-name
-        S3Key: lambda/fetch_train.zip
+        S3Bucket: nhtsa-analytics
+        S3Key: lambda/lambda_train.zip
       Timeout: 300
       MemorySize: 128
 
-  LambdaPredict:
+  InferenceLambda:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: PredictLambda
-      Handler: lambda_predict_s3.lambda_handler
+      FunctionName: InferenceLambda
+      Handler: lambda_inference.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Runtime: python3.9
       Code:
-        S3Bucket: your-s3-bucket-name
-        S3Key: lambda/predict.zip
+        S3Bucket: nhtsa-analytics
+        S3Key: lambda/lambda_inference.zip
       Timeout: 300
       MemorySize: 128
 
@@ -53,8 +51,8 @@ Resources:
                   - s3:GetObject
                   - s3:ListBucket
                 Resource:
-                  - !Sub "arn:aws:s3:::your-s3-bucket-name/*"
-                  - !Sub "arn:aws:s3:::your-s3-bucket-name"
+                  - !Sub "arn:aws:s3:::nhtsa-analytics/*"
+                  - !Sub "arn:aws:s3:::nhtsa-analytics"
               - Effect: Allow
                 Action:
                   - sagemaker:CreateTrainingJob
@@ -67,6 +65,8 @@ Resources:
                   - logs:PutLogEvents
                 Resource: "*"
 
+# SCHEDULE TRAINING JOB
+
   EventRule:
     Type: AWS::Events::Rule
     Properties:
@@ -74,13 +74,40 @@ Resources:
       ScheduleExpression: cron(0 10 ? * MON *)
       State: ENABLED
       Targets:
-        - Id: FetchTrainLambda
-          Arn: !GetAtt LambdaFetchTrain.Arn
+        - Id: TrainLambda
+          Arn: !GetAtt TrainLambda.Arn
 
   LambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !GetAtt LambdaFetchTrain.Arn
+      FunctionName: !GetAtt TrainLambda.Arn
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt EventRule.Arn
+
+# TRIGGER INFERENCE ON TRAIN COMPLETION
+
+  TrainLambdaCompletionRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: TrainLambdaCompletionRule
+      EventPattern:
+        source:
+          - "aws.lambda"
+        detail-type:
+          - "Lambda Function Invocation Result - Success"
+        detail:
+          functionName:
+            - !Ref TrainLambda
+      State: ENABLED
+      Targets:
+        - Id: InferenceLambda
+          Arn: !GetAtt InferenceLambda.Arn
+
+  LambdaInvokePermissionForTrain:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt InferenceLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt TrainLambdaCompletionRule.Arn

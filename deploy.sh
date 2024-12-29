@@ -1,30 +1,60 @@
 #!/bin/bash
 
 # Variables
-S3_BUCKET="your-s3-bucket-name"
-STACK_NAME="logistic-pipeline-stack"
-TEMPLATE_FILE="logistic_pipeline_infra.yaml"
-FETCH_TRAIN_LAMBDA="lambda_fetch_train.py"
-PREDICT_LAMBDA="lambda_predict_s3.py"
-FETCH_TRAIN_ZIP="fetch_train.zip"
-PREDICT_ZIP="predict.zip"
+S3_BUCKET="nhtsa-analytics"
+S3_STACK_NAME="nhtsa-s3"
+S3_TEMPLATE_FILE="nhtsa_s3.yaml"
 
-# Step 1: Zip the Lambda code
-zip -j "$FETCH_TRAIN_ZIP" "$FETCH_TRAIN_LAMBDA"
-zip -j "$PREDICT_ZIP" "$PREDICT_LAMBDA"
+TRAIN_SCRIPT="lambda_train.py"
+TRAIN_PACKAGE="lambda_train_package"
+TRAIN_ZIP="lambda_train.zip"
 
-# Step 2: Upload Lambda packages to S3
-aws s3 cp "$FETCH_TRAIN_ZIP" "s3://$S3_BUCKET/lambda/$FETCH_TRAIN_ZIP"
-aws s3 cp "$PREDICT_ZIP" "s3://$S3_BUCKET/lambda/$PREDICT_ZIP"
+INFERENCE_SCRIPT="lambda_inference.py"
+INFERNECE_PACKAGE="lambda_inference_package"
+INFERENCE_ZIP="lambda_inference.zip"
 
-# Step 3: Deploy the CloudFormation stack
+PIPELINE_STACK_NAME="nhtsa-pipeline"
+PIPELINE_TEMPLATE_FILE="nhtsa_pipeline.yaml"
+
+# Deploy the CloudFormation stack
 aws cloudformation deploy \
-    --stack-name "$STACK_NAME" \
-    --template-file "$TEMPLATE_FILE" \
+    --stack-name "$S3_STACK_NAME" \
+    --template-file "$S3_TEMPLATE_FILE" \
     --capabilities CAPABILITY_NAMED_IAM
 
-# Step 4: Clean up local zip files
-rm "$FETCH_TRAIN_ZIP" "$PREDICT_ZIP"
+# Output success message
+echo "CloudFormation stack '$S3_STACK_NAME' deployed successfully."
+
+# Zip and Upload the Lambda code
+mkdir "$TRAIN_PACKAGE"
+cd "$TRAIN_PACKAGE"
+pip install requests -t .
+zip -r "$TRAIN_ZIP" .
+aws s3 cp "$TRAIN_ZIP" "s3://$S3_BUCKET/lambda/$TRAIN_ZIP"
+cd ..
+rmdir -r "$TRAIN_PACKAGE"
+
+mkdir "$INFERENCE_PACKAGE"
+cd "$INFERENCE_PACKAGE"
+pip install requests -t .
+zip -r "$INFERENCE_ZIP" .
+aws s3 cp "$INFERENCE_ZIP" "s3://$S3_BUCKET/lambda/$INFERENCE_ZIP"
+cd ..
+rmdir -r "$INFERENCE_PACKAGE"
 
 # Output success message
-echo "CloudFormation stack '$STACK_NAME' deployed successfully."
+echo "Lambda code uploaded successfully."
+
+# Deploy the CloudFormation stack
+aws cloudformation deploy \
+    --stack-name "$PIPELINE_STACK_NAME" \
+    --template-file "$PIPELINE_TEMPLATE_FILE" \
+    --capabilities CAPABILITY_NAMED_IAM
+
+# Output success message
+echo "CloudFormation stack '$PIPELINE_STACK_NAME' deployed successfully."
+
+# Trigger training lambda
+aws lambda invoke --function-name TrainLambda \
+    --payload '{"bucket_name": "nhtsa-analytics", "model_year": 2020' \
+    response.json
