@@ -56,6 +56,29 @@ def fetch_complaints(models_df):
             ])
     return pd.DataFrame(complaints)
 
+def fetch_recalls(models_df):
+    recalls = []
+    for _, row in models_df.iterrows():
+        recalls_url = f"https://api.nhtsa.gov/recalls/recallsByVehicle?make={row['make']}&model={row['model']}&modelYear={row['modelYear']}"
+        response = requests.get(recalls_url)
+        recalls_data = response.json()
+        if 'results' in recalls_data:
+            recalls.extend([{
+                'make': row['make'],
+                'model': row['model'],
+                'modelYear': row['modelYear'],
+                'NHTSACampaignNumber': recall['NHTSACampaignNumber'],
+                'manufacturer': recall['Manufacturer'],
+                'component': recall['Component'],
+                'summary': recall['Summary'],
+                'consequence': recall.get('Consequence'),
+                'remedy': recall.get('Remedy'),
+                'notes': recall.get('Notes'),
+                'reportDate': recall.get('ReportReceivedDate'),
+                'affectedVehicles': recall.get('AffectedVehicles')
+            } for recall in recalls_data['results']])
+    return pd.DataFrame(recalls)
+
 def lambda_handler(event, context):
     # AWS resource clients
     s3 = boto3.client('s3')
@@ -73,22 +96,36 @@ def lambda_handler(event, context):
     makes_list = fetch_makes(model_year, issue_type='c')
     models_df = fetch_models(model_year, makes_list, issue_type='c')
     complaints_df = fetch_complaints(models_df)
+    recalls_df = fetch_recalls(models_df)
+    
+    # Transformations
+    complaints_agg = complaints_df.groupby(['make', 'model']).size().reset_index(name='complaints_count')
+    recalls_agg = recalls_df.groupby(['make', 'model']).size().reset_index(name='recalls_count')
+    merged_data = pd.merge(complaints_agg, recalls_agg, on=['make', 'model'], how='outer').fillna(0)
 
     # Save data to S3
-    data_key = f"data/complaints_data_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv"
+    data_key = f"data/train_data_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv"
     csv_buffer = io.StringIO()
-    complaints_df.to_csv(csv_buffer, index=False)
+    merged_data.to_csv(csv_buffer, index=False)
     s3.put_object(Bucket=bucket_name, Key=data_key, Body=csv_buffer.getvalue())
 
-    # Launch SageMaker training job
+    # Launch SageMaker training job with a custom script
     training_job_name = f"LogisticRegressionJob-{datetime.now().strftime('%Y%m%d%H%M%S')}"
     response = sagemaker.create_training_job(
         TrainingJobName=training_job_name,
         AlgorithmSpecification={
-            "TrainingImage": "683313688378.dkr.ecr.us-west-2.amazonaws.com/sagemaker-sklearn:0.23-1-cpu-py3",
-            "TrainingInputMode": "File"
+            "TrainingImage": "683313688378.dkr.ecr.us-west-2.amazonaws.com/sagemaker-sklearn:0.23-1-cpu-py3",  # Example: Pre-built SageMaker Scikit-learn container
+            "TrainingInputMode": "File",
+            "MetricDefinitions": [
+                {"Name": "accuracy", "Regex": "accuracy=([0-9\\.]+)"},
+                {"Name": "precision", "Regex": "precision=([0-9\\.]+)"},
+            ]
         },
-        #RoleArn=sagemaker_role,
+        HyperParameters={
+            "sagemaker_program": "train_logistic_regression.py",
+            "sagemaker_submit_directory": f"s3://{bucket_name}/scripts/train_logistic_regression.py"
+        },
+        #RoleArn=role,
         InputDataConfig=[
             {
                 "ChannelName": "train",
